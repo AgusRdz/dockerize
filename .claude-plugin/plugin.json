@@ -1,0 +1,12 @@
+{
+  "name": "dockerize",
+  "version": "1.0.0",
+  "description": "Dockerize any application with production-grade best practices. Supports .NET, Angular, Node.js, Bun, Deno, PHP (Laravel/Symfony), Go, and Python.",
+  "author": {
+    "name": "Agustin Rodriguez",
+    "email": "agustin.rodriguez@realmanage.com"
+  },
+  "repository": "https://github.com/agustin-rodriguez/dockerize",
+  "license": "MIT",
+  "keywords": ["docker", "dockerfile", "containerize", "devops", "docker-compose"]
+}
