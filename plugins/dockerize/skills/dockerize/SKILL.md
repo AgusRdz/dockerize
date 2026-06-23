@@ -50,7 +50,7 @@ When generating both, generate dev first (simpler to validate), then prod.
 
 Read all of: `Dockerfile`, `Dockerfile.dev`, `Dockerfile.*`, `docker-compose*.yml`, `.dockerignore`.
 
-Also run stack detection (same as Phase 1 below) — needed to evaluate whether base images match the stack and whether hot-reload tooling is correct.
+Also run **Phase 1 — Stack Detection** and **Phase 1b — Deployment Target Detection** (defined in GENERATE MODE below). Both are needed to evaluate whether the Docker setup matches what the project actually does. A finding is only valid in context — a nginx runtime stage is wrong for S3/CloudFront but right for a container-served app.
 
 ### A2 — Score Against Rubric
 
@@ -93,6 +93,13 @@ Evaluate every finding. Assign severity. Never skip a finding because it "seems 
 | D08 | LOW | Deno `DENO_DIR` not persisted as named volume (re-downloads deps on every restart) |
 | D09 | LOW | Go dev image doesn't include a file watcher (`air`, `reflex`) |
 
+#### Deployment Context Checks
+
+| ID | Severity | Check |
+|----|----------|-------|
+| X01 | HIGH | Static build (Angular/Node/Bun) has a nginx runtime stage but project deploys to S3/CloudFront/Amplify/Vercel/Netlify — runtime stage is dead weight, never runs |
+| X02 | INFO | Container-served static build has no nginx runtime stage — **only flag if deployment target is container, not CDN** |
+
 #### docker-compose Checks
 
 | ID | Severity | Check |
@@ -103,6 +110,15 @@ Evaluate every finding. Assign severity. Never skip a finding because it "seems 
 | C04 | MEDIUM | Missing `depends_on` — app can start before database |
 | C05 | MEDIUM | Database port exposed to host in production (unnecessary attack surface) |
 | C06 | LOW | No named volumes for persistent data (anonymous volumes are lost on `down`) |
+| C07 | TRADE-OFF | `package.json` / `composer.json` / `go.mod` mounted read-write — see note below |
+
+**C07 — package manifest mount mode (trade-off, not a flat finding):**
+
+Read-write is **correct** when developers manage packages from inside the container (e.g. `make npm-install`, `make composer`, `make go`). The container writes the updated manifest and lockfile back to the host via the bind mount — this is the intended workflow when a Makefile is present.
+
+Read-only (`:ro`) is appropriate only when the container never needs to modify its own dependencies — i.e. packages are always managed on the host and reinstalled on `make up`.
+
+**Report C07 as informational, not a finding.** State which mode is in use and confirm it matches the team's workflow. Only flag if `:ro` is set but `make <pkg-manager>` targets exist (contradictory), or if read-write is set with no Makefile and no documented workflow (silent drift risk).
 
 ### A3 — Report Findings
 
@@ -224,6 +240,45 @@ Glob: Pipfile
 | `package.json` (no angular/bun/deno) | Node.js |
 | `go.mod` | Go |
 | `requirements.txt` / `pyproject.toml` / `Pipfile` | Python |
+
+---
+
+### Phase 1b — Deployment Target Detection
+
+Run in parallel with stack detection. Results affect which templates are generated and which audit findings apply.
+
+Probe for static hosting / CDN deployment signals:
+
+```
+Glob: .gitlab-ci.yml
+Glob: .github/workflows/*.yml
+Glob: amplify.yml
+Glob: vercel.json
+Glob: netlify.toml
+Glob: serverless.yml
+Glob: cdk.json
+```
+
+Then grep for deployment commands in CI files and `package.json` scripts:
+
+```
+Grep: aws s3 sync|s3://|CloudFront|amplify publish|vercel --prod|netlify deploy
+```
+
+**Deployment target table:**
+
+| Signal | Target | Effect on generation |
+|--------|--------|----------------------|
+| `aws s3 sync` or `s3://` in CI/scripts | S3 + CloudFront | Skip nginx runtime stage for static builds; add S3 deploy note instead |
+| `amplify.yml` | AWS Amplify | Skip nginx; Amplify handles CDN |
+| `vercel.json` | Vercel | Skip nginx; Vercel handles serving |
+| `netlify.toml` | Netlify | Skip nginx; Netlify handles serving |
+| None of the above | Container-served | Include nginx runtime stage as normal |
+
+**If static hosting detected for an Angular/Node/Bun/Deno static build:**
+- The production Dockerfile only needs the **build stage** — no runtime stage
+- The build output is an artifact to be uploaded, not a container to run
+- State this clearly in the plan and skip the runtime image template
 
 ---
 
