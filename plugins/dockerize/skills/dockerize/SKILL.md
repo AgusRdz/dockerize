@@ -92,6 +92,7 @@ Evaluate every finding. Assign severity. Never skip a finding because it "seems 
 | D07 | MEDIUM | Source watching uses polling but `CHOKIDAR_USEPOLLING` or `--poll` not set (misses changes on bind mounts on some hosts) |
 | D08 | LOW | Deno `DENO_DIR` not persisted as named volume (re-downloads deps on every restart) |
 | D09 | LOW | Go dev image doesn't include a file watcher (`air`, `reflex`) |
+| D10 | HIGH | Angular dev container runs as non-root but `.angular` is covered by the host bind mount — Vite cache writes fail with `EACCES`. Fix: mount `.angular` as a named volume and `chown -R node:node /app` before `USER node` in Dockerfile.dev |
 
 #### Deployment Context Checks
 
@@ -412,7 +413,12 @@ EXPOSE 4200 24678
 
 # Install deps — node_modules stays in image; source mounted over /app
 COPY package*.json ./
-RUN npm install
+RUN npm install \
+    && mkdir -p /app/.angular \
+    && chown -R node:node /app
+
+# Run as non-root — must chown /app BEFORE this line
+USER node
 
 # Source mounted at runtime
 CMD ["npx", "ng", "serve", \
@@ -430,13 +436,19 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - .:/app
-      - /app/node_modules    # anonymous volume prevents host override
+      - /app/node_modules          # anonymous: prevents host node_modules override
+      - angular-cache:/app/.angular  # named: Vite dep cache; avoids host-bind permission issues
     environment:
       - CHOKIDAR_USEPOLLING=1
     ports:
       - "4200:4200"
       - "24678:24678"    # Vite HMR WebSocket
+
+volumes:
+  angular-cache:
 ```
+
+**Why the named volume for `.angular`:** The bind mount (`.:/app`) runs on Docker Desktop with uid/gid translation that can fail for subdirectories the container creates at runtime. Mounting `.angular` as a separate named volume avoids this — Docker initializes the volume from the image's `/app/.angular` directory, which is already owned by `node` from the `chown` above.
 
 For SSR, also expose port `4000` (or whatever `server.ts` uses) and add it to the `ng serve` command if applicable. In Angular 19 SSR with Vite, the dev server serves both browser and server bundles on port `4200`.
 
