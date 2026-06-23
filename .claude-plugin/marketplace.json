@@ -1,0 +1,25 @@
+{
+  "name": "dockerize",
+  "description": "Docker configuration plugins for Claude Code — dev environments, production images, and audits.",
+  "owner": {
+    "name": "Agustin Rodriguez",
+    "email": "agustin.rodriguez@realmanage.com"
+  },
+  "plugins": [
+    {
+      "name": "dockerize",
+      "description": "Generate Docker dev/prod environments or audit existing setups. Supports .NET, Angular, Node.js, Bun, Deno, PHP (Laravel/Symfony), Go, and Python.",
+      "author": {
+        "name": "Agustin Rodriguez"
+      },
+      "category": "devops",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/AgusRdz/dockerize.git",
+        "path": "plugins/dockerize",
+        "ref": "main"
+      },
+      "homepage": "https://github.com/AgusRdz/dockerize"
+    }
+  ]
+}
