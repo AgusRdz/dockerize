@@ -1,15 +1,22 @@
 ---
-description: Dockerize the current project with production-grade best practices
-argument-hint: [stack-override]
+description: >-
+  Generate Docker dev/prod configuration or audit an existing Docker setup.
+  Modes: generate dev environment (hot reload, source mounts, debug ports),
+  generate production config (multi-stage, non-root, pinned, health checks),
+  audit existing Dockerfile/docker-compose for security and best-practice
+  issues. Optionally generates a Makefile with Docker shortcuts and package
+  manager wrappers (npm, composer, artisan, dotnet, go, pip, etc.).
+argument-hint: "[audit | dev | prod | both | <stack>]"
 allowed-tools: [Read, Write, Edit, Glob, Grep, Bash]
 ---
 
 # /dockerize
 
-Containerize the current project using the `dockerize` skill.
+Run the `dockerize` skill for the current project.
 
-Invoke the skill and pass any arguments the user provided:
+Arguments passed by the user: $ARGUMENTS
 
-$ARGUMENTS
-
-The skill will auto-detect the stack. If `$ARGUMENTS` names a specific stack (e.g. `node`, `dotnet`, `laravel`), use that as the detected stack and skip the fingerprinting phase.
+- No arguments → skill auto-detects stack and asks which mode (audit / dev / prod / both)
+- `audit` → skip to audit mode regardless of stack
+- `dev` / `prod` / `both` → skip mode question, generate the requested config
+- Stack name (`node`, `dotnet`, `laravel`, `go`, `python`, `bun`, `deno`, `angular`, `symfony`, `php`) → skip stack detection, use named stack
