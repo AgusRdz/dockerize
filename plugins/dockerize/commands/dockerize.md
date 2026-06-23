@@ -12,11 +12,14 @@ allowed-tools: [Read, Write, Edit, Glob, Grep, Bash]
 
 # /dockerize
 
-Run the `dockerize` skill for the current project.
+You MUST follow the `dockerize` skill instructions exactly — do not improvise or summarize them. The skill is loaded in your context as `dockerize:dockerize`. Read and execute every phase in order.
 
-Arguments passed by the user: $ARGUMENTS
+User arguments: $ARGUMENTS
 
-- No arguments → skill auto-detects stack and asks which mode (audit / dev / prod / both)
-- `audit` → skip to audit mode regardless of stack
-- `dev` / `prod` / `both` → skip mode question, generate the requested config
-- Stack name (`node`, `dotnet`, `laravel`, `go`, `python`, `bun`, `deno`, `angular`, `symfony`, `php`) → skip stack detection, use named stack
+Argument routing — apply BEFORE Phase 0:
+- No arguments → run Phase 0 (auto-detect mode)
+- `audit` → jump directly to AUDIT MODE, skip Phase 0 question
+- `dev` → jump to GENERATE MODE, skip mode question, generate dev only
+- `prod` → jump to GENERATE MODE, skip mode question, generate prod only
+- `both` → jump to GENERATE MODE, skip mode question, generate both dev and prod
+- Stack name (`node`, `dotnet`, `laravel`, `go`, `python`, `bun`, `deno`, `angular`, `symfony`, `php`) → jump to GENERATE MODE, skip stack detection, use the named stack
