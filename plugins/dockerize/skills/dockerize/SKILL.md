@@ -99,42 +99,82 @@ Evaluate every finding. Assign severity. Never skip a finding because it "seems 
 
 ### A3 — Report Findings
 
-Output a findings table:
+Output the full audit report. For every finding, include:
+1. The finding itself (what is wrong and where)
+2. The proposed fix (exactly what the change would look like — a concrete diff or the replacement snippet)
+
+Format:
 
 ```
 ## Docker Audit Report
 
 ### Production Dockerfile
-| ID  | Severity | Finding                                          | Line |
-|-----|----------|--------------------------------------------------|------|
-| P01 | CRITICAL | Final stage has no USER — runs as root           | —    |
-| P04 | HIGH     | FROM node:latest — unpinned tag                  | 1    |
-| P07 | HIGH     | COPY . . on line 8 before npm ci on line 9       | 8    |
-| P08 | MEDIUM   | No HEALTHCHECK instruction                       | —    |
+| ID  | Severity | Finding                                   | Line |
+|-----|----------|-------------------------------------------|------|
+| P01 | CRITICAL | Final stage has no USER — runs as root    | —    |
+| P04 | HIGH     | FROM node:latest — unpinned tag           | 1    |
+| P07 | HIGH     | COPY . . on line 8 before npm ci on line 9| 8    |
+| P08 | MEDIUM   | No HEALTHCHECK instruction                | —    |
 
 ### Development Setup
-| ID  | Severity | Finding                                          |
-|-----|----------|--------------------------------------------------|
-| D01 | HIGH     | No Dockerfile.dev or source volume mount found   |
-| D02 | HIGH     | No anonymous volume for node_modules             |
+| ID  | Severity | Finding                                   |
+|-----|----------|-------------------------------------------|
+| D01 | HIGH     | No Dockerfile.dev or source volume mount  |
+| D02 | HIGH     | No anonymous volume for node_modules      |
 
 ### docker-compose.yml
-| ID  | Severity | Finding                                          | Line |
-|-----|----------|--------------------------------------------------|------|
-| C02 | HIGH     | app depends_on db but no condition: service_healthy |  14 |
+| ID  | Severity | Finding                                   | Line |
+|-----|----------|-------------------------------------------|------|
+| C02 | HIGH     | depends_on db missing condition: service_healthy | 14 |
 
 Score: X/17 production checks passed, Y/9 dev checks passed.
+
+---
+
+### Proposed Fixes
+
+**P01 — Add non-root user (Dockerfile, final stage)**
+```diff
++ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+  COPY --from=build /app/dist ./dist
++ USER appuser
 ```
 
-### A4 — Fix
+**P04 — Pin base image tag (Dockerfile, line 1)**
+```diff
+- FROM node:latest
++ FROM node:22-alpine
+```
 
-Ask: "Fix all findings? Or select by ID?"
+*(one block per finding)*
+```
 
-Apply fixes in-place using Edit. Show a brief diff summary after each file.
+### A4 — Confirm Before Fixing
 
-When fixing P04 (unpinned tag): detect the stack and substitute the correct pinned tag (not a guess — read the actual version from `package.json`, `.csproj`, `go.mod`, etc.).
+**HARD STOP. Do not touch any file yet.**
 
-When fixing P05 (no multi-stage): rewrite the Dockerfile using the correct template from Phase 4-Prod below. Preserve any custom `ENV`, `LABEL`, `ARG`, and `RUN` instructions that aren't part of the standard template.
+After presenting the report and proposed fixes, output exactly this prompt and wait for the user's response:
+
+```
+---
+Ready to apply fixes. How would you like to proceed?
+
+  [1] Fix all findings automatically
+  [2] Fix by ID — specify which (e.g. "fix P01 P04")
+  [3] Discuss a specific finding before fixing
+  [4] Skip — I'll handle these manually
+
+Your choice:
+```
+
+Only proceed to apply changes after the user explicitly responds. Never auto-apply.
+
+**Applying fixes (after confirmation):**
+
+- Apply one finding at a time using Edit. After each file is changed, output a one-line summary: `✓ P01 fixed — added non-root user in final stage`.
+- When fixing P04 (unpinned tag): read the actual version from `package.json`, `.csproj`, `go.mod`, etc. — never guess.
+- When fixing P05 (no multi-stage): rewrite the Dockerfile using the correct template from Phase 4-Prod. Preserve any custom `ENV`, `LABEL`, `ARG`, and `RUN` instructions not in the standard template.
+- After all selected fixes are applied, re-run the checks for the fixed findings only and confirm they now pass.
 
 ---
 
