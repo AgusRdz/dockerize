@@ -14,6 +14,12 @@ version: 2.0.0
 
 Three modes: **Audit** an existing Docker setup, generate a **Dev** environment, or generate a **Production** configuration. The goal is never just "a Dockerfile" — it's a complete, working environment for each context.
 
+**Output rules — follow strictly:**
+- All output is plain markdown rendered in the terminal. No exceptions.
+- Never invoke `artifact-design`, `Artifact`, or any other rendering skill.
+- Never create web pages, HTML files, or visual artifacts.
+- Findings tables, proposed fixes, and checklists are plain fenced markdown blocks.
+
 ---
 
 ## Phase 0 — Mode Detection
