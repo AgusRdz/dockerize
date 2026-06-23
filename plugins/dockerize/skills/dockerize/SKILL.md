@@ -71,6 +71,7 @@ Evaluate every finding. Assign severity. Never skip a finding because it "seems 
 | P15 | LOW | `WORKDIR` not set (operations against `/`) |
 | P16 | LOW | `EXPOSE` missing, wrong port, or mismatches app config |
 | P17 | LOW | `ADD` used where `COPY` suffices (ADD has implicit tar extraction and URL fetch) |
+| P18 | HIGH | `|| true` or `2>/dev/null` silences failures in `RUN` — broken builds ship silently |
 
 #### Development Docker Checks
 
@@ -301,6 +302,9 @@ EXPOSE 8080 5005
 COPY src/**/*.csproj ./src/
 RUN dotnet restore
 
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+USER appuser
+
 # Source is mounted at runtime — do not COPY here
 CMD ["dotnet", "watch", "run", "--project", "src/<ProjectName>", \
      "--urls", "http://+:8080"]
@@ -417,7 +421,7 @@ If no `dev` script found, default `CMD` to `["node", "--watch", "--inspect=0.0.0
 # syntax=docker/dockerfile:1
 FROM oven/bun:1.2-alpine
 WORKDIR /app
-EXPOSE 3000
+EXPOSE 3000 6499
 
 COPY package.json bun.lockb* ./
 RUN bun install
@@ -438,6 +442,7 @@ services:
       - NODE_ENV=development
     ports:
       - "3000:3000"
+      - "6499:6499"    # Bun Inspector (--inspect)
 ```
 
 Check `package.json` `scripts.dev` and use that instead of the hardcoded `CMD` if found.
@@ -498,8 +503,8 @@ FROM golang:1.24-alpine
 WORKDIR /app
 EXPOSE 8080 2345
 
-RUN go install github.com/air-verse/air@latest && \
-    go install github.com/go-delve/delve/cmd/dlv@latest
+RUN go install github.com/air-verse/air@v1.61.7 && \
+    go install github.com/go-delve/delve/cmd/dlv@v1.24.2
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -578,7 +583,7 @@ xdebug.mode=debug
 xdebug.start_with_request=yes
 xdebug.client_host=host.docker.internal
 xdebug.client_port=9003
-xdebug.log=/var/log/xdebug.log
+xdebug.log=/tmp/xdebug.log
 ```
 
 **docker-compose.override.yml additions:**
@@ -639,9 +644,12 @@ WORKDIR /app
 EXPOSE 8000
 
 COPY requirements*.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
-# Source mounted at runtime
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+# Source mounted at runtime — USER set after install so pip can write to site-packages
+USER appuser
 CMD ["uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
@@ -753,34 +761,35 @@ Read `outputPath` from `angular.json` to find the browser output dir.
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine AS runtime
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup && \
-    chown -R appuser:appgroup \
-      /usr/share/nginx/html \
-      /var/cache/nginx \
-      /var/log/nginx \
-      /etc/nginx/conf.d
+# nginxinc/nginx-unprivileged runs entirely as uid 101 — no root needed, listens on 8080
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 COPY --from=build /app/dist/<project-name>/browser /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-USER appuser
-EXPOSE 80
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-  CMD wget -q -O- http://localhost/ || exit 1
+  CMD wget -q -O- http://localhost:8080/health || exit 1
 ```
+
+> **Why `nginxinc/nginx-unprivileged`**: standard `nginx` master process binds port 80 as root; switching `USER` before it starts crashes the container. The unprivileged variant runs the entire server as uid 101, listens on 8080, and needs zero privilege at any point.
 
 **docker/nginx.conf** (also generate):
 ```nginx
 server {
-    listen 80;
+    listen 8080;
+    server_tokens off;
     root /usr/share/nginx/html;
     index index.html;
 
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
     location / {
         try_files $uri $uri/ /index.html;
@@ -808,7 +817,7 @@ server {
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 RUN npm run build
 
@@ -834,12 +843,12 @@ CMD ["node", "server/server.mjs"]
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 RUN npm run build
 
@@ -870,7 +879,7 @@ WORKDIR /app
 COPY bun.lockb* package.json ./
 RUN bun install --frozen-lockfile
 COPY . .
-RUN bun run build 2>/dev/null || true
+RUN bun run build
 
 FROM oven/bun:1.2-alpine AS runtime
 WORKDIR /app
@@ -913,11 +922,15 @@ Use minimum `--allow-*` flags. Read `deno.json` `tasks.start` to find the actual
 ```dockerfile
 # syntax=docker/dockerfile:1
 FROM golang:1.24-alpine AS build
+# TARGETARCH is injected by BuildKit -- correct binary for amd64 AND arm64
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -ldflags="-w -s" -trimpath \
     -o /app/server ./cmd/server
 
@@ -930,6 +943,8 @@ ENTRYPOINT ["/server"]
 ```
 
 > If the binary doesn't support `-healthcheck`, use `gcr.io/distroless/base-debian12:nonroot` (has glibc) or `alpine:3.21` (has `wget`). Distroless `HEALTHCHECK` must use exec form — no shell.
+>
+> **Multi-arch builds**: `docker buildx build --platform linux/amd64,linux/arm64 -t image:tag .` — BuildKit sets `$TARGETARCH` automatically per platform.
 
 Find the build target by checking for `cmd/` subdirectories in the repo. Common: `./cmd/server`, `./cmd/api`, `./main.go`.
 
@@ -958,11 +973,13 @@ RUN apk add --no-cache nginx supervisor && \
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /var/www/html
 COPY --from=composer --chown=appuser:appgroup /app .
-RUN php artisan config:cache && \
-    php artisan route:cache && \
-    php artisan view:cache && \
-    chown -R appuser:appgroup storage bootstrap/cache && \
+RUN chown -R appuser:appgroup storage bootstrap/cache && \
     chmod -R 775 storage bootstrap/cache
+
+# Caches run at container startup (not build time) — they need the real env vars
+# and may need DB access. Generate docker/entrypoint.sh (see below).
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/www.conf
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -970,6 +987,7 @@ COPY docker/opcache.ini /usr/local/etc/php/conf.d/opcache.ini
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget -q -O- http://localhost/up || exit 1
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 ```
 
@@ -1002,14 +1020,27 @@ http {
 }
 ```
 
+**docker/entrypoint.sh** (also generate — runs artisan caches with real env at startup):
+```bash
+#!/bin/sh
+set -e
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+exec "$@"
+```
+
 **docker/supervisord.conf:**
 ```ini
 [supervisord]
 nodaemon=true
+# supervisord itself stays root so it can manage processes;
+# each child process drops to appuser via its own user= setting
 user=root
 
 [program:php-fpm]
 command=php-fpm -F
+user=appuser
 autostart=true
 autorestart=true
 stdout_logfile=/dev/stdout
@@ -1018,6 +1049,9 @@ stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 
 [program:nginx]
+# nginx master binds port 80 as root; workers drop to the user
+# defined in nginx.conf (user nginx). For fully rootless, use
+# nginxinc/nginx-unprivileged on port 8080 instead.
 command=nginx -g "daemon off;"
 autostart=true
 autorestart=true
@@ -1071,9 +1105,9 @@ Replace health check target with `/` or a dedicated `/health` route.
 # syntax=docker/dockerfile:1
 FROM python:3.13-slim AS build
 WORKDIR /app
-RUN pip install --upgrade pip
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefix=/install -r requirements.txt
 
 FROM python:3.13-slim AS runtime
 WORKDIR /app
@@ -1084,8 +1118,15 @@ USER appuser
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# gunicorn manages workers; uvicorn handles async I/O per worker
+# WEB_CONCURRENCY defaults to (2 * cpus + 1) when unset
+CMD ["gunicorn", "main:app", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "${WEB_CONCURRENCY:-4}"]
 ```
+
+> **Note**: `gunicorn` and `uvicorn[standard]` must be in `requirements.txt`. Bare `uvicorn` with `--workers` is not a real process manager — if a worker dies, it isn't restarted.
 
 **Poetry (`pyproject.toml` with `[tool.poetry]`):**
 Replace build stage with:
@@ -1095,7 +1136,8 @@ WORKDIR /app
 RUN pip install poetry==1.8.3
 COPY pyproject.toml poetry.lock ./
 RUN poetry export -f requirements.txt --output requirements.txt --without-hashes --without dev
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefix=/install -r requirements.txt
 ```
 
 ---
@@ -1126,6 +1168,7 @@ docker-compose*.yml
 ```
 node_modules/
 dist/
+.angular/
 .nuxt/
 .next/
 coverage/
@@ -1219,6 +1262,8 @@ services:
     build:
       dockerfile: Dockerfile
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true    # blocks privilege escalation via setuid binaries
     deploy:
       resources:
         limits:
@@ -1668,4 +1713,6 @@ Verify:
   [ ] docker run --rm <name> id   (uid should not be 0)
   [ ] Secrets come from .env file, not baked into image
   [ ] make help outputs all available targets
+  [ ] Scan image: trivy image <name> or grype <name>
+  [ ] Node.js apps: confirm SIGTERM handler exits cleanly (docker stop → no SIGKILL timeout)
 ```
