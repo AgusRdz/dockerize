@@ -12,7 +12,13 @@ allowed-tools: [Read, Write, Edit, Glob, Grep, Bash]
 
 # /dockerize
 
-You MUST follow the `dockerize` skill instructions exactly — do not improvise or summarize them. The skill is loaded in your context as `dockerize:dockerize`. Read and execute every phase in order.
+**Step 1** — Read the skill instructions file:
+
+```
+Read: ${CLAUDE_PLUGIN_ROOT}/skills/dockerize/SKILL.md
+```
+
+**Step 2** — Follow every instruction in that file exactly, starting from Phase 0. Do not summarize, skip, or improvise any phase.
 
 User arguments: $ARGUMENTS
 
