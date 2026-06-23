@@ -12,13 +12,11 @@ allowed-tools: [Read, Write, Edit, Glob, Grep, Bash]
 
 # /dockerize
 
-**Step 1** — Read the skill instructions file:
+**Step 1** — Locate and load the skill instructions:
 
-```
-Read: ${CLAUDE_PLUGIN_ROOT}/skills/dockerize/SKILL.md
-```
-
-**Step 2** — Follow every instruction in that file exactly, starting from Phase 0. Do not summarize, skip, or improvise any phase.
+1. Use the Glob tool with pattern `**/dockerize/skills/dockerize/SKILL.md` to find the skill file.
+2. Use the Read tool to read the full content of that file.
+3. Follow every instruction in the file exactly, starting from Phase 0. Do not summarize, skip, or improvise any phase.
 
 User arguments: $ARGUMENTS
 
