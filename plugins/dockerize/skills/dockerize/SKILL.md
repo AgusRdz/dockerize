@@ -199,6 +199,12 @@ Only proceed to apply changes after the user explicitly responds. Never auto-app
 - When fixing P05 (no multi-stage): rewrite the Dockerfile using the correct template from Phase 4-Prod. Preserve any custom `ENV`, `LABEL`, `ARG`, and `RUN` instructions not in the standard template.
 - After all selected fixes are applied, re-run the checks for the fixed findings only and confirm they now pass.
 
+**CRITICAL — COPY file creation rule:**
+Whenever a fix adds a `COPY <src> <dest>` instruction for a file that does not already exist on disk (e.g. `docker/entrypoint.sh`, `docker/nginx.conf`, `docker/supervisord.conf`), you MUST create that file in the same step — immediately after the Dockerfile edit. Never add a `COPY` that references a missing local file without also creating it. Use Glob to check whether the file exists before adding the COPY. If it doesn't exist, Write it.
+
+**CRITICAL — Stack scope:**
+Stack-specific patterns (e.g. `docker/entrypoint.sh` with `php artisan` caches, `supervisord.conf`, PHP-FPM configs) MUST only be applied when the detected stack is PHP/Laravel/Symfony. Verify the stack before applying any PHP-specific patterns. Node.js, Angular, Bun, Deno, Go, Python, and .NET projects do NOT use entrypoint.sh artisan patterns.
+
 ---
 
 ## GENERATE MODE
