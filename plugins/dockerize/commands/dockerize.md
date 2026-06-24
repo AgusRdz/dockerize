@@ -27,3 +27,11 @@ Argument routing — apply BEFORE Phase 0:
 - `prod` → jump to GENERATE MODE, skip mode question, generate prod only
 - `both` → jump to GENERATE MODE, skip mode question, generate both dev and prod
 - Stack name (`node`, `dotnet`, `laravel`, `go`, `python`, `bun`, `deno`, `angular`, `symfony`, `php`) → jump to GENERATE MODE, skip stack detection, use the named stack
+- `--makefile` flag (can combine with any of the above) → pre-answer the Makefile question as "yes", skip the prompt for it
+- `--no-makefile` flag → pre-answer the Makefile question as "no", skip the prompt for it
+
+Examples:
+- `/dockerize` — auto-detect, ask everything
+- `/dockerize angular --makefile` — Angular, generate Makefile without asking
+- `/dockerize audit` — audit existing setup
+- `/dockerize prod` — prod only, still ask about Makefile

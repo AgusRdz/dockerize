@@ -388,7 +388,6 @@ Files to generate:
   docker-compose.prod.yml   (prod: restart policy, resource limits, no dev ports)
   docker/nginx.conf         (if Angular static or PHP)
   docker/supervisord.conf   (if PHP with FPM + Nginx in one container)
-  Makefile                  (optional — ask user)
 
 Dev features:
   Hot reload  : <method>
@@ -400,8 +399,21 @@ Exposed    : <port>
 Non-root   : <username>
 ```
 
-Ask:
-- "Should I also generate a `Makefile` with Docker shortcuts and package manager wrappers? (y/n)"
+**HARD STOP — two questions before writing any file:**
+
+```
+[1] Does this look right? (y to proceed / describe changes)
+[2] Generate a Makefile with Docker shortcuts and <stack> package manager
+    wrappers (make up, make logs, make shell, make npm, etc.)? (y/n)
+```
+
+Do NOT proceed until the user explicitly answers both. Do NOT default the Makefile to "yes". Do NOT generate the Makefile unless the user answers "y" to question 2 or passed `--makefile` in the original arguments.
+
+**CRITICAL — directory creation rule:**
+Before writing any file that lives in a subdirectory (e.g. `docker/nginx.conf`, `docker/supervisord.conf`, `docker/php-fpm.conf`), create the parent directory by writing a placeholder first or ensure the Write tool creates it. Specifically:
+- Any stack that generates files under `docker/` MUST create that directory implicitly (Write tool creates parent dirs automatically — confirm the path uses forward slashes so Write succeeds on Windows)
+- Never generate a Dockerfile `COPY docker/<file>` without also writing `docker/<file>` to disk in the same generation pass
+- Never generate a Dockerfile `COPY bin/<file>` without also writing `bin/<file>` to disk
 
 ---
 
