@@ -388,6 +388,7 @@ Files to generate:
   docker-compose.prod.yml   (prod: restart policy, resource limits, no dev ports)
   docker/nginx.conf         (if Angular static or PHP)
   docker/supervisord.conf   (if PHP with FPM + Nginx in one container)
+  abin/<tool>.sh            (always — stack-appropriate wrapper scripts)
 
 Dev features:
   Hot reload  : <method>
@@ -447,10 +448,190 @@ Final write list:
   - docker/php-fpm.conf (if PHP prod)
   - docker/opcache.ini (if PHP prod)
   - docker/entrypoint.sh (if PHP Laravel/Symfony prod)
+  - abin/<tool>.sh × N (ALWAYS — see Phase 4-abin for per-stack list)
   - Makefile (ONLY if explicitly opted in)
 ```
 
-Write **exactly** the files on this list, in this order, **nothing else**. No extra helper scripts, no README updates, no bin/ scripts unless the user asked for them.
+Write **exactly** the files on this list, in this order, **nothing else**. No extra helper scripts outside `abin/`, no README updates.
+
+---
+
+### Phase 4-abin — Wrapper Scripts
+
+**Always generated**, regardless of mode (dev / prod / both) or nginx selection. These are local convenience scripts that run commands inside the running dev container. They live in `abin/` at the project root and are never `COPY`'d into any image.
+
+**Conventions for every script:**
+- Shebang: `#!/bin/sh`
+- `set -e` on line 2
+- Pass all arguments through with `"$@"` so the script acts as a transparent proxy
+- Use `docker compose exec` (requires container already running) not `docker compose run`
+- Service name defaults to `app` — if the docker-compose service has a different name, use that
+
+**Add `abin/` to `.dockerignore`** — these scripts are for local use only.
+
+**Per-stack scripts:**
+
+#### Angular / Node.js / Bun
+
+```sh
+# abin/npm.sh
+#!/bin/sh
+set -e
+docker compose exec app npm "$@"
+```
+
+```sh
+# abin/ng.sh  (Angular only)
+#!/bin/sh
+set -e
+docker compose exec app npx ng "$@"
+```
+
+```sh
+# abin/test.sh
+#!/bin/sh
+set -e
+docker compose exec app npm test "$@"
+```
+
+#### PHP — Laravel
+
+```sh
+# abin/artisan.sh
+#!/bin/sh
+set -e
+docker compose exec app php artisan "$@"
+```
+
+```sh
+# abin/composer.sh
+#!/bin/sh
+set -e
+docker compose exec app composer "$@"
+```
+
+```sh
+# abin/test.sh
+#!/bin/sh
+set -e
+docker compose exec app php artisan test "$@"
+```
+
+#### PHP — Symfony
+
+```sh
+# abin/console.sh
+#!/bin/sh
+set -e
+docker compose exec app php bin/console "$@"
+```
+
+```sh
+# abin/composer.sh
+#!/bin/sh
+set -e
+docker compose exec app composer "$@"
+```
+
+```sh
+# abin/test.sh
+#!/bin/sh
+set -e
+docker compose exec app php bin/phpunit "$@"
+```
+
+#### Go
+
+```sh
+# abin/go.sh
+#!/bin/sh
+set -e
+docker compose exec app go "$@"
+```
+
+```sh
+# abin/test.sh
+#!/bin/sh
+set -e
+docker compose exec app go test ./... "$@"
+```
+
+#### Python (Django / FastAPI / Flask)
+
+```sh
+# abin/pip.sh
+#!/bin/sh
+set -e
+docker compose exec app pip "$@"
+```
+
+```sh
+# abin/manage.sh  (Django only)
+#!/bin/sh
+set -e
+docker compose exec app python manage.py "$@"
+```
+
+```sh
+# abin/test.sh
+#!/bin/sh
+set -e
+docker compose exec app pytest "$@"
+```
+
+#### .NET Core / .NET 5+
+
+```sh
+# abin/dotnet.sh
+#!/bin/sh
+set -e
+docker compose exec app dotnet "$@"
+```
+
+```sh
+# abin/test.sh
+#!/bin/sh
+set -e
+docker compose exec app dotnet test "$@"
+```
+
+#### Deno
+
+```sh
+# abin/deno.sh
+#!/bin/sh
+set -e
+docker compose exec app deno "$@"
+```
+
+```sh
+# abin/test.sh
+#!/bin/sh
+set -e
+docker compose exec app deno test "$@"
+```
+
+**Common scripts for every stack (always include):**
+
+```sh
+# abin/shell.sh  — open an interactive shell in the container
+#!/bin/sh
+set -e
+docker compose exec app sh "$@"
+```
+
+```sh
+# abin/logs.sh  — tail container logs
+#!/bin/sh
+set -e
+docker compose logs -f "${1:-app}"
+```
+
+**After writing each script, make it executable:**
+The `Write` tool creates files but does not set execute bits. After generating all `abin/` scripts, run:
+```
+Bash: chmod +x abin/*.sh
+```
 
 ---
 
@@ -1375,6 +1556,7 @@ Dockerfile*
 docker-compose*.yml
 .dockerignore
 .air.toml
+abin/
 ```
 
 **Append for Node.js / Angular / Bun / Deno:**
@@ -1893,6 +2075,7 @@ Generated:
   [x] docker/nginx.conf             (if applicable)
   [x] docker/supervisord.conf       (if applicable)
   [x] .air.toml                     (Go only)
+  [x] abin/<tool>.sh                (always — chmod +x applied)
   [x] Makefile                      (if requested)
 
 Replace before using:
