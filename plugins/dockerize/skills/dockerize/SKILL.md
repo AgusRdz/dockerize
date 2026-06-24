@@ -78,6 +78,7 @@ Evaluate every finding. Assign severity. Never skip a finding because it "seems 
 | P16 | LOW | `EXPOSE` missing, wrong port, or mismatches app config |
 | P17 | LOW | `ADD` used where `COPY` suffices (ADD has implicit tar extraction and URL fetch) |
 | P18 | HIGH | `|| true` or `2>/dev/null` silences failures in `RUN` — broken builds ship silently |
+| P19 | CRITICAL | `.npmrc` / `.yarnrc.yml` / `auth.json` has token variable (`${NPM_TOKEN}` etc.) but `npm ci` / `composer install` uses `ARG`/`ENV` to pass it — token visible in `docker history`. Fix: `--mount=type=secret` |
 
 #### Development Docker Checks
 
@@ -289,6 +290,69 @@ Grep: aws s3 sync|s3://|CloudFront|amplify publish|vercel --prod|netlify deploy
 
 ---
 
+### Phase 1c — Private Registry Detection
+
+Run in parallel with Phase 1 and 1b. Results affect how `npm ci` / `composer install` / `pip install` are generated.
+
+Probe for private registry configuration files:
+
+```
+Glob: .npmrc
+Glob: .yarnrc.yml
+Glob: .pnpmfile.cjs
+Glob: auth.json               (Composer)
+```
+
+Then grep each file found for token variable references or auth entries:
+
+```
+Grep: \$\{.*TOKEN\}|\$\{.*PASSWORD\}|\$\{.*AUTH\}|//.*:_authToken|//.*:username|authToken
+```
+
+**Private registry decision table:**
+
+| Signal | Manager | Secret approach |
+|--------|---------|-----------------|
+| `.npmrc` with `${NPM_TOKEN}` or `_authToken` | npm / yarn | `--mount=type=secret,id=npm_token,env=NPM_TOKEN` on `npm ci` |
+| `.npmrc` with `${YARN_TOKEN}` | yarn | same pattern, env name matches var |
+| `.yarnrc.yml` with `npmAuthToken` ref | yarn berry | `--mount=type=secret,id=yarn_token,env=YARN_TOKEN` on `yarn install --immutable` |
+| `auth.json` with `${COMPOSER_TOKEN}` | composer | `--mount=type=secret,id=composer_token,env=COMPOSER_TOKEN` on `composer install` |
+| No private registry config found | — | standard `npm ci` / `composer install` — no secret needed |
+
+**When a private registry is detected, apply this pattern in every `npm ci` / `yarn install` / `composer install` RUN step:**
+
+```dockerfile
+# Copy the registry config file (contains registry URL and token variable ref — safe to bake in)
+COPY package*.json .npmrc ./
+# Token injected only for this RUN step — never baked into an image layer
+RUN --mount=type=secret,id=npm_token,env=NPM_TOKEN \
+    --mount=type=cache,target=/root/.npm \
+    npm ci
+```
+
+**docker-compose additions (both dev and prod overrides):**
+
+```yaml
+secrets:
+  npm_token:
+    environment: NPM_TOKEN    # reads host env var NPM_TOKEN at build time
+```
+
+**Also add to the Makefile header comment:**
+
+```makefile
+# Required env vars: NPM_TOKEN=<GitLab/GitHub PAT with read_package_registry scope>
+```
+
+**CRITICAL rules for private registry handling:**
+- NEVER use `ARG NPM_TOKEN` + `ENV NPM_TOKEN` — this bakes the token into every layer and exposes it via `docker history`
+- NEVER put the literal token in any file that gets `COPY`'d into the image
+- The `.npmrc` file with `${NPM_TOKEN}` is safe to copy — it's a variable reference, not the token itself
+- The registry config file (`.npmrc`, `.yarnrc.yml`) MUST be copied before the `RUN` that needs it; the secret provides the token value at build time only
+- If `.npmrc` does NOT exist in the project but private packages are detected (by `@scope/` prefixes in `package.json` pointing to non-public registries), ask the user to provide the registry URL before proceeding
+
+---
+
 ### Phase 2 — Version Extraction
 
 Read the config file to pick the pinned base image tag. Never use `latest`.
@@ -449,6 +513,27 @@ volumes:
 ```
 
 **Why the named volume for `.angular`:** The bind mount (`.:/app`) runs on Docker Desktop with uid/gid translation that can fail for subdirectories the container creates at runtime. Mounting `.angular` as a separate named volume avoids this — Docker initializes the volume from the image's `/app/.angular` directory, which is already owned by `node` from the `chown` above.
+
+**Private registry override (apply when Phase 1c detected `.npmrc` with token vars):**
+Replace the `COPY package*.json` + `RUN npm install` block with:
+```dockerfile
+COPY package*.json .npmrc ./
+RUN --mount=type=secret,id=npm_token,env=NPM_TOKEN \
+    npm install \
+    && mkdir -p /app/.angular \
+    && chown -R node:node /app
+```
+And add to `docker-compose.override.yml` under the `app.build` block:
+```yaml
+      secrets:
+        - npm_token
+```
+And at the top level:
+```yaml
+secrets:
+  npm_token:
+    environment: NPM_TOKEN
+```
 
 For SSR, also expose port `4000` (or whatever `server.ts` uses) and add it to the `ng serve` command if applicable. In Angular 19 SSR with Vite, the dev server serves both browser and server bundles on port `4200`.
 
