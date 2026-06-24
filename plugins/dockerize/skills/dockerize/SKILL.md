@@ -417,6 +417,43 @@ Before writing any file that lives in a subdirectory (e.g. `docker/nginx.conf`, 
 
 ---
 
+### Phase 3b — Pre-Generation Checklist
+
+After the user confirms the plan, build the complete write list **before writing a single file**. Go through every file the generation will produce and tick every box:
+
+```
+For every Dockerfile / Dockerfile.dev being generated:
+  □ List every `COPY <local-path> <dest>` instruction
+  □ For each: does <local-path> already exist on disk?
+      - Yes → proceed
+      - No  → add <local-path> to the write list (will be created as part of this generation)
+  □ For each local path in a subdirectory (e.g. docker/, bin/):
+      → the directory MUST appear in the write list before any file inside it
+
+For Makefile:
+  □ Is --makefile in the arguments OR did the user answer "y" to question 2 in Phase 3?
+      - Yes → add Makefile to write list
+      - No  → Makefile is NOT in the write list. Period.
+
+Final write list:
+  - Dockerfile (if prod or both)
+  - Dockerfile.dev (if dev or both)
+  - .dockerignore
+  - docker-compose.yml
+  - docker-compose.override.yml (if dev or both)
+  - docker-compose.prod.yml (if prod or both)
+  - docker/nginx.conf (if Angular static prod, PHP prod — ONLY if nginx stage is included)
+  - docker/supervisord.conf (if PHP prod with FPM+nginx in one container)
+  - docker/php-fpm.conf (if PHP prod)
+  - docker/opcache.ini (if PHP prod)
+  - docker/entrypoint.sh (if PHP Laravel/Symfony prod)
+  - Makefile (ONLY if explicitly opted in)
+```
+
+Write **exactly** the files on this list, in this order, **nothing else**. No extra helper scripts, no README updates, no bin/ scripts unless the user asked for them.
+
+---
+
 ### Phase 4-Dev — Development Configuration
 
 **Philosophy**: the dev container is a development machine, not a runtime. Source is never `COPY`'d — it's mounted. The goal is zero rebuild on code change.
